@@ -440,6 +440,12 @@ func listPackage(from *listedPackage, path string) (*listedPackage, error) {
 	}
 
 	pkg, ok := sharedCache.ListedPackages[path]
+	if !ok && strings.HasSuffix(from.ImportPath, ".test") {
+		// A package only used while building a test binary may be listed under a
+		// test-scoped import path like "pkg/path [example.test]" instead of its
+		// plain import path.
+		pkg, ok = sharedCache.ListedPackages[path+" ["+from.ImportPath+"]"]
+	}
 
 	// A std package may list any other package in std, even those it doesn't depend on.
 	// This is due to how runtime linkname-implements std packages,
