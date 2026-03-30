@@ -1,0 +1,56 @@
+# A package used only via export_test.go can be listed under a test-scoped
+# import path like "pkg/path [pkg.test]". Garble must resolve that form too.
+
+env GOGARBLE=test/bar
+
+exec go test ./internal/foo
+stdout 'ok\s+test/bar/internal/foo'
+
+exec go list -deps -test ./internal/foo
+stdout 'test/bar/mocks/foo \[test/bar/internal/foo.test\]'
+
+exec garble test ./internal/foo
+stdout 'ok\s+test/bar/internal/foo'
+-- go.mod --
+module test/bar
+
+go 1.23
+-- internal/foo/foo.go --
+package foo
+
+func LocalFoo(v interface{ Foo() string }) string {
+	return v.Foo()
+}
+-- internal/foo/export_test.go --
+package foo
+
+type ExportedFoo interface {
+	Foo() string
+}
+
+-- internal/foo/foo_test.go --
+package foo_test
+
+import (
+	"testing"
+
+	"test/bar/internal/foo"
+	mockfoo "test/bar/mocks/foo"
+)
+
+func TestFoo(t *testing.T) {
+	if got := foo.LocalFoo(mockfoo.MockFoo{}); got != "Foo" {
+		t.Fatalf("LocalFoo() = %q", got)
+	}
+}
+
+-- mocks/foo/foo.go --
+package foo
+
+import under_test "test/bar/internal/foo"
+
+var _ under_test.ExportedFoo = MockFoo{}
+
+type MockFoo struct{}
+
+func (MockFoo) Foo() string { return "Foo" }
