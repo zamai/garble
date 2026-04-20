@@ -17,6 +17,7 @@ import (
 	"go/version"
 	"io"
 	"io/fs"
+	"iter"
 	"log"
 	"os"
 	"os/exec"
@@ -518,7 +519,7 @@ func (f *seedFlag) Set(s string) error {
 	if s == "random" {
 		f.random = true // to show the random seed we chose
 
-		f.bytes = make([]byte, 16) // random 128 bit seed
+		f.bytes = make([]byte, 8) // random 64 bit seed
 		if _, err := cryptorand.Read(f.bytes); err != nil {
 			return fmt.Errorf("error generating random seed: %v", err)
 		}
@@ -679,25 +680,31 @@ func splitFlagsFromFiles(all []string, ext string) (flags, paths []string) {
 // the last value is returned.
 func flagValue(flags []string, name string) string {
 	lastVal := ""
-	flagValueIter(flags, name, func(val string) {
+	for val := range flagValues(flags, name) {
 		lastVal = val
-	})
+	}
 	return lastVal
 }
 
-// flagValueIter retrieves all the values for a flag such as "-foo", like
+// flagValues retrieves all the values for a flag such as "-foo", like
 // flagValue. The difference is that it allows handling complex flags, such as
 // those whose values compose a list.
-func flagValueIter(flags []string, name string, fn func(string)) {
-	for i, arg := range flags {
-		if val, ok := strings.CutPrefix(arg, name+"="); ok {
-			// -name=value
-			fn(val)
-		}
-		if arg == name { // -name ...
-			if i+1 < len(flags) {
-				// -name value
-				fn(flags[i+1])
+func flagValues(flags []string, name string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for i, arg := range flags {
+			if val, ok := strings.CutPrefix(arg, name+"="); ok {
+				// -name=value
+				if !yield(val) {
+					return
+				}
+			}
+			if arg == name { // -name ...
+				if i+1 < len(flags) {
+					// -name value
+					if !yield(flags[i+1]) {
+						return
+					}
+				}
 			}
 		}
 	}
