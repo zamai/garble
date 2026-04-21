@@ -1,15 +1,29 @@
-# A package used only via export_test.go can be listed under a test-scoped
-# import path like "pkg/path [pkg.test]". Garble must resolve that form too.
+# A package used only while building a test binary can be listed under a
+# test-scoped import path like "pkg/path [pkg.test]". Garble must resolve the
+# plain form to that scoped variant, both during compilation and during linking.
+#
+# This test covers two regressions:
+#  1. A package with an external (_test) package and a white-box test, whose
+#     mock is only used from the external test. `go list` reports the mock
+#     only under its test-scoped path. (regression: "list mocks/foo: not found")
+#  2. `go test ./...` links a greeter.test binary with an importcfg that
+#     refers to "mocks/foo" by its plain path, even though the test binary's
+#     dependencies are the test-scoped variants. The plain path may also be in
+#     ListedPackages because the same package is built as a dependency of
+#     another package in the build. (regression: "list mocks/foo: not a dependency")
 
 env GOGARBLE=test/bar
 
-exec go test ./internal/foo
+exec go test ./...
 stdout 'ok\s+test/bar/internal/foo'
 
 exec go list -deps -test ./internal/foo
 stdout 'test/bar/mocks/foo \[test/bar/internal/foo.test\]'
 
 exec garble test ./internal/foo
+stdout 'ok\s+test/bar/internal/foo'
+
+exec garble test ./...
 stdout 'ok\s+test/bar/internal/foo'
 -- go.mod --
 module test/bar
@@ -18,16 +32,27 @@ go 1.23
 -- internal/foo/foo.go --
 package foo
 
-func LocalFoo(v interface{ Foo() string }) string {
-	return v.Foo()
-}
--- internal/foo/export_test.go --
-package foo
-
-type ExportedFoo interface {
+type Fooer interface {
 	Foo() string
 }
 
+func LocalFoo(v Fooer) string {
+	return v.Foo()
+}
+-- internal/foo/foo_whitebox_test.go --
+package foo
+
+import "testing"
+
+func TestWhitebox(t *testing.T) {
+	if got := LocalFoo(inlineFoo{}); got != "foo" {
+		t.Fatalf("LocalFoo() = %q", got)
+	}
+}
+
+type inlineFoo struct{}
+
+func (inlineFoo) Foo() string { return "foo" }
 -- internal/foo/foo_test.go --
 package foo_test
 
@@ -43,13 +68,12 @@ func TestFoo(t *testing.T) {
 		t.Fatalf("LocalFoo() = %q", got)
 	}
 }
-
 -- mocks/foo/foo.go --
 package foo
 
 import under_test "test/bar/internal/foo"
 
-var _ under_test.ExportedFoo = MockFoo{}
+var _ under_test.Fooer = MockFoo{}
 
 type MockFoo struct{}
 

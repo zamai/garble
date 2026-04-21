@@ -440,11 +440,20 @@ func listPackage(from *listedPackage, path string) (*listedPackage, error) {
 	}
 
 	pkg, ok := sharedCache.ListedPackages[path]
-	if !ok && strings.HasSuffix(from.ImportPath, ".test") {
+	if strings.HasSuffix(from.ImportPath, ".test") {
 		// A package only used while building a test binary may be listed under a
 		// test-scoped import path like "pkg/path [example.test]" instead of its
-		// plain import path.
-		pkg, ok = sharedCache.ListedPackages[path+" ["+from.ImportPath+"]"]
+		// plain import path. The generated "pkg.test" main package and its
+		// importcfg still refer to those dependencies via the plain path, so we
+		// must resolve the plain path to its test-scoped variant when one exists.
+		// Prefer the test-scoped variant over the plain one when the plain path
+		// is not a dependency of this .test package, since the linker's
+		// importcfg uses plain names even when go list reports the scoped form.
+		if testScoped, okTest := sharedCache.ListedPackages[path+" ["+from.ImportPath+"]"]; okTest {
+			if !ok || !from.hasDep(pkg.ImportPath) {
+				pkg, ok = testScoped, true
+			}
+		}
 	}
 
 	// A std package may list any other package in std, even those it doesn't depend on.
